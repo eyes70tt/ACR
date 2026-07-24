@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NFC 管理面板</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+*{font-family:'Inter',system-ui,sans-serif}
+.font-mono{font-family:'JetBrains Mono',monospace!important}
+body{background:#0a0e17}.sector-cell{transition:all .3s ease;cursor:pointer}
+.sector-cell:hover{transform:scale(1.08);z-index:10}
+.sector-unknown{background:#1a1f2e;border-color:#2a2f3e}
+.sector-keya{background:#0d3320;border-color:#1a6b3c;box-shadow:0 0 12px rgba(34,197,94,.15)}
+.sector-keyb{background:#0d2033;border-color:#1a4b6b;box-shadow:0 0 12px rgba(59,130,246,.15)}
+.sector-both{background:linear-gradient(135deg,#0d3320,#0d2033);border-color:#2d5a5a}
+.sector-cracking{background:#332a0d;border-color:#6b5a1a;animation:pulse-glow 1s ease-in-out infinite}
+.sector-reading{background:#1a1f2e;border-color:#4a5a7a;animation:pulse-glow 1.5s ease-in-out infinite}
+@keyframes pulse-glow{0%,100%{box-shadow:0 0 8px rgba(250,204,21,.1)}50%{box-shadow:0 0 20px rgba(250,204,21,.3)}}
+#log-console{background:#060a12;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6}
+#log-console .log-info{color:#94a3b8}#log-console .log-ok{color:#22c55e}
+#log-console .log-warn{color:#eab308}#log-console .log-error{color:#ef4444}
+#log-console .log-card{color:#818cf8}#log-console .log-sector{color:#22d3ee}
+#log-console .log-key{color:#fbbf24}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.online{background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,.6)}
+.status-dot.offline{background:#64748b}
+.status-dot.card-present{background:#818cf8;box-shadow:0 0 8px rgba(129,140,248,.6)}
+.tab-btn.active{border-bottom-color:#818cf8;color:#818cf8}
+.tab-content{display:none}.tab-content.active{display:block}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2a2f3e;border-radius:2px}
+.progress-ring-circle{stroke-dasharray:251.2;stroke-dashoffset:251.2;transition:stroke-dashoffset .5s ease;transform:rotate(-90deg);transform-origin:center}
+.toast{position:fixed;bottom:24px;right:24px;z-index:999;transform:translateY(120%);transition:transform .4s cubic-bezier(.4,0,.2,1)}
+.toast.show{transform:translateY(0)}
+</style>
+</head>
+<body class="text-gray-200 min-h-screen">
+<div id="app" class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-6">
+<header class="flex flex-wrap items-center justify-between gap-2 mb-4 sm:mb-6 pb-3 border-b border-gray-800">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-indigo-500/20 rounded-lg flex items-center justify-center">
+<svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 0 1-4-4V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v12a4 4 0 0 1-4 4Zm0 0h12a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 0 1 2.828 0l2.829 2.829a2 2 0 0 1 0 2.828l-8.486 8.485M7 17h.01"/></svg></div>
+<div><h1 class="text-lg sm:text-xl font-bold text-white tracking-tight">NFC 管理面板</h1><p class="text-xs text-gray-500">ACR122U · Raspberry Pi</p></div></div>
+<div class="flex items-center gap-4 text-xs">
+<div class="flex items-center gap-1.5"><span class="status-dot offline" id="reader-dot"></span><span id="reader-label" class="text-gray-500">Reader Offline</span></div>
+<div class="flex items-center gap-1.5"><span class="status-dot offline" id="card-dot"></span><span id="card-status" class="text-gray-500">No Card</span></div></div></header>
+
+<div id="card-info-bar" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
+<div class="bg-gray-900/60 rounded-lg p-3 border border-gray-800"><p class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">UID</p><p id="card-uid" class="font-mono text-sm text-indigo-300"></p></div>
+<div class="bg-gray-900/60 rounded-lg p-3 border border-gray-800"><p class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">卡片类型</p><p id="card-type" class="font-mono text-sm text-green-300"></p></div>
+<div class="bg-gray-900/60 rounded-lg p-3 border border-gray-800"><p class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">ATQA / SAK</p><p id="card-atqa" class="font-mono text-sm text-yellow-300"></p></div>
+<div class="bg-gray-900/60 rounded-lg p-3 border border-gray-800"><p class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">固件版本</p><p id="reader-firmware" class="font-mono text-sm text-cyan-300"></p></div></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
+<!-- Main Panel -->
+<div class="xl:col-span-2 space-y-4">
+<div class="bg-gray-900/40 rounded-xl border border-gray-800 p-4">
+<h2 class="text-sm font-semibold text-gray-300 mb-3">操作</h2>
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+<button id="btn-read-card" disabled class="px-3 py-2 bg-indigo-600/20 border border-indigo-700/50 hover:bg-indigo-600/40 rounded-lg text-xs font-medium text-indigo-300">读整卡</button>
+<button id="btn-dump" disabled class="px-3 py-2 bg-green-600/20 border border-green-700/50 hover:bg-green-600/40 rounded-lg text-xs font-medium text-green-300">下载备份</button>
+<button id="btn-write" disabled class="px-3 py-2 bg-amber-600/20 border border-amber-700/50 hover:bg-amber-600/40 rounded-lg text-xs font-medium text-amber-300">写入卡片</button>
+<button id="btn-upload" disabled class="px-3 py-2 bg-blue-600/20 border border-blue-700/50 hover:bg-blue-600/40 rounded-lg text-xs font-medium text-blue-300">导入写入</button>
+</div>
+<input id="dump-file-input" type="file" accept=".bin,.mfd,.mct" class="hidden">
+</div>
+
+<div class="bg-gray-900/40 rounded-xl border border-gray-800 p-4">
+<h2 class="text-sm font-semibold text-gray-300 mb-3">扇区状态图</h2>
+<div id="sector-grid" class="grid grid-cols-4 sm:grid-cols-8 gap-2"></div></div>
+
+<div class="bg-gray-900/40 rounded-xl border border-gray-800 p-4">
+<h2 class="text-sm font-semibold text-gray-300 mb-3">破译引擎</h2>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+<div><label class="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">攻击方式</label>
+<div class="flex gap-2">
+<button id="crack-mfoc" class="flex-1 px-3 py-2 bg-indigo-600/20 border border-indigo-700/50 hover:bg-indigo-600/40 rounded-lg text-xs font-medium text-indigo-300 transition-colors">Nested (mfoc)</button>
+<button id="crack-mfcuk" class="flex-1 px-3 py-2 bg-purple-600/20 border border-purple-700/50 hover:bg-purple-600/40 rounded-lg text-xs font-medium text-purple-300 transition-colors">Darkside (mfcuk)</button></div></div>
+<div><label class="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">已知密钥（可选）</label>
+<input id="crack-known-key" type="text" placeholder="FFFFFFFFFFFF" maxlength="12" class="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs font-mono text-gray-300"></div></div>
+<div class="flex items-center gap-3">
+<div id="crack-progress-ring" class="hidden relative w-12 h-12">
+<svg class="w-12 h-12" viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="none" stroke="#1a1f2e" stroke-width="8"/><circle id="crack-ring" cx="48" cy="48" r="40" fill="none" stroke="#a78bfa" stroke-width="8" class="progress-ring-circle"/></svg>
+<span id="crack-percent" class="absolute inset-0 flex items-center justify-center text-xs font-mono text-indigo-300">0%</span></div>
+<span id="crack-status-text" class="hidden text-xs text-gray-400">Ready</span>
+<button id="btn-crack-stop" class="hidden px-3 py-1.5 bg-red-600/20 border border-red-700/50 hover:bg-red-600/40 rounded-lg text-xs font-medium text-red-300">停止</button></div></div></div>
+
+<!-- Side Panel -->
+<div class="space-y-4">
+<div class="bg-gray-900/40 rounded-xl border border-gray-800 p-4">
+<h2 class="text-sm font-semibold text-gray-300 mb-2">扇区详情</h2>
+<div id="sector-detail" class="text-xs text-gray-500">点击上方扇区查看详情</div></div>
+<div class="bg-gray-900/40 rounded-xl border border-gray-800 p-4">
+<div class="flex items-center justify-between mb-2">
+<h2 class="text-sm font-semibold text-gray-300">日志控制台</h2>
+<button onclick="clearLog()" class="text-xs text-gray-500 hover:text-gray-300">清空</button></div>
+<div id="log-console" class="h-48 overflow-y-auto rounded-lg p-2 border border-gray-800"><div class="log-info">[系统] NFC 管理面板已加载</div></div></div></div></div></div>
+
+<div id="toast" class="toast"><div class="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl"><p id="toast-msg" class="text-sm text-gray-200"></p></div></div>
+
+<script>
+const socket = io({autoConnect:false});
+const readerState = {connected:false,cardPresent:false,cardInfo:{}};
+const crackState = {running:false,sectors:{}};
+let sectorData = {};
+
+document.addEventListener("DOMContentLoaded", init);
+
+function init(){
+["btn-read-card","btn-read-card","btn-dump","btn-write","btn-upload","crack-mfoc","crack-mfcuk"].forEach(id=>{
+const el=document.getElementById(id);if(el)el.disabled=true});
+setupEventListeners();
+fetch("/api/status").then(r=>r.json()).then(d=>{updateReaderStatus(d);socket.connect()}).catch(()=>setReaderOffline());
+}
+
+function setupEventListeners(){
+document.getElementById("btn-read-card").addEventListener("click",readCard);
+document.getElementById("btn-dump").addEventListener("click",downloadDump);
+document.getElementById("btn-write").addEventListener("click",writeCard);
+document.getElementById("btn-upload").addEventListener("click",()=>document.getElementById("dump-file-input").click());
+document.getElementById("dump-file-input").addEventListener("change",uploadDump);
+document.getElementById("crack-mfoc").addEventListener("click",()=>startCrack("mfoc"));
+document.getElementById("crack-mfcuk").addEventListener("click",()=>startCrack("mfcuk"));
+document.getElementById("btn-crack-stop").addEventListener("click",stopCrack);
+socket.on("reader_status",d=>updateReaderStatus(d));
+socket.on("card_event",d=>handleCardEvent(d));
+socket.on("crack_update",d=>handleCrackUpdate(d));
+}
+
+function log(type,msg){
+const cls="log-"+type;const ts=new Date().toLocaleTimeString();
+const el=document.getElementById("log-console");
+const line=document.createElement("div");line.className=cls;
+line.textContent="["+ts+"] "+msg;el.appendChild(line);el.scrollTop=el.scrollHeight;
+}
+function clearLog(){document.getElementById("log-console").innerHTML='<div class="log-info">[System] Log cleared</div>'}
+function showToast(msg,duration=3000){
+const t=document.getElementById("toast");
+document.getElementById("toast-msg").textContent=msg;t.classList.add("show");
+clearTimeout(t._timeout);t._timeout=setTimeout(()=>t.classList.remove("show"),duration);
+}
+
+function updateReaderStatus(data){
+readerState.connected=data.connected;readerState.cardPresent=data.card_present;
+const rDot=document.getElementById("reader-dot");const rLabel=document.getElementById("reader-label");
+if(data.connected){rDot.className="status-dot online";rLabel.textContent=data.reader_name||"ACR122U";rLabel.className="text-green-400"}
+else{rDot.className="status-dot offline";rLabel.textContent="Reader Offline";rLabel.className="text-gray-500"}
+const cDot=document.getElementById("card-dot");const cLabel=document.getElementById("card-status");
+if(data.card_present){cDot.className="status-dot card-present";cLabel.textContent="卡片已检测";cLabel.className="text-indigo-400"}
+else{cDot.className="status-dot offline";cLabel.textContent="No Card";cLabel.className="text-gray-500"}
+const bar=document.getElementById("card-info-bar");
+if(data.card_present&&data.card_info){bar.classList.remove("hidden");
+document.getElementById("card-uid").textContent=data.card_info.uid||"--";
+document.getElementById("card-type").textContent=data.card_info.card_type||"Unknown";
+document.getElementById("card-atqa").textContent=(data.card_info.atqa||"--")+"/"+(data.card_info.sak||"--")}
+else bar.classList.add("hidden");
+const en=data.card_present&&data.connected;
+["btn-read-card","btn-dump","btn-write","btn-upload"].forEach(id=>{
+const el=document.getElementById(id);if(el)el.disabled=!en});
+}
+
+function setReaderOffline(){readerState.connected=false;readerState.cardPresent=false}
+
+function handleCardEvent(data){
+if(data.event==="card_arrived"){log("card","卡片已放入: "+data.uid);showToast("Card: "+data.uid);loadSectorGrid()}
+else if(data.event==="card_removed"){log("warn","卡片已拿走");showToast("Card removed",2000);sectorData={};loadSectorGrid();document.getElementById("card-info-bar").classList.add("hidden")}
+}
+
+function loadSectorGrid(){
+const grid=document.getElementById("sector-grid");const total=readerState.cardInfo?.sectors||16;
+const sectors=crackState.sectors||{};grid.innerHTML="";
+for(let i=0;i<total;i++){const sec=sectors[i]||{};let cls="sector-unknown";
+if(sec.found){if(sec.key_a&&sec.key_b)cls="sector-both";else if(sec.key_a)cls="sector-keya";else if(sec.key_b)cls="sector-keyb"}
+const cell=document.createElement("button");
+cell.className="sector-cell "+cls+" rounded-lg border p-2 text-center";
+cell.innerHTML='<div class="text-[10px] font-mono font-bold text-gray-300">'+String(i).padStart(2,"0")+'</div>'+
+'<div class="text-[8px] font-mono '+(sec.key_a?"text-green-500/70":"text-gray-700")+'">A: '+(sec.key_a?sec.key_a.slice(0,5)+"…":"--")+'</div>'+
+'<div class="text-[8px] font-mono '+(sec.key_b?"text-blue-500/70":"text-gray-700")+'">B: '+(sec.key_b?sec.key_b.slice(0,5)+"…":"--")+'</div>';
+cell.onclick=()=>showSectorDetail(i);grid.appendChild(cell)}}
+
+function showSectorDetail(sector){
+document.getElementById("sector-detail").innerHTML='<p class="font-mono text-green-300">扇区 '+String(sector).padStart(2,"0")+'</p>';}
+
+async function readCard(){log("info","读取整卡中...");showToast("读取整卡...");loadSectorGrid()}
+
+async function downloadDump(){
+log("info","正在下载备份...");
+try{const resp=await fetch("/api/dump/download");if(resp.ok){const blob=await resp.blob();
+const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;
+a.download="card_dump_"+new Date().toISOString().slice(0,10)+".bin";a.click();
+URL.revokeObjectURL(url);log("ok","备份下载完成 ("+blob.size+" bytes)");showToast("下载成功")}
+else{const e=await resp.json();log("error","下载失败: "+(e.detail||""))}}
+catch(e){log("error","下载异常: "+e.message);showToast("下载失败")}}
+
+async function uploadDump(e){
+const file=e.target.files[0];if(!file)return;
+log("info","正在导入: "+file.name+" ("+file.size+" bytes)");
+try{const buf=await file.arrayBuffer();
+const resp=await fetch("/api/dump/upload_file",{method:"POST",body:buf});
+const data=await resp.json();if(resp.ok){log("ok","已上传: "+data.filename);showToast("正在写入卡片...");
+const writeResp=await fetch("/api/dump/upload?filename="+data.filename,{method:"POST"});
+if(writeResp.ok){log("ok","写入成功!");showToast("写入成功!")}else{const err=await writeResp.json();log("error","写入失败: "+(err.detail||""));showToast("写入失败")}}
+else log("error","上传失败")}catch(e){log("error","异常: "+e.message);showToast("操作异常")}
+e.target.value=""}
+
+async function writeCard(){
+showToast("正在读取当前卡片...");
+try{const resp=await fetch("/api/dump/download");if(resp.ok){const blob=await resp.blob();
+const uploadResp=await fetch("/api/dump/upload_file",{method:"POST",body:blob});
+const upData=await uploadResp.json();if(!uploadResp.ok){showToast("上传失败");return}
+const writeResp=await fetch("/api/dump/upload?filename="+upData.filename,{method:"POST"});
+if(writeResp.ok){showToast("写入成功!");log("ok","卡片写入完成")}else{const err=await writeResp.json();showToast("写入失败");log("error","写入失败: "+(err.detail||""))}}
+else{showToast("读取失败");log("error","读取失败")}}catch(e){showToast("异常: "+e.message);log("error","写入异常: "+e.message)}}
+
+async function startCrack(type){log("info","启动 "+type+" 攻击...");showToast("破解已启动");
+try{const resp=await fetch("/api/crack/"+type,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+if(resp.ok){log("ok",type+" 攻击已启动")}else{const e=await resp.json();log("error","启动失败: "+(e.detail||""))}}
+catch(e){log("error","异常: "+e.message)}}
+
+function handleCrackUpdate(data){if(!data)return;log("info","破解更新: "+JSON.stringify(data).slice(0,100))}
+async function stopCrack(){try{await fetch("/api/crack/stop",{method:"POST"});log("warn","破解已停止")}catch(e){}}
+
+setInterval(()=>{if(socket?.connected)return;
+fetch("/api/status").then(r=>r.json()).then(d=>updateReaderStatus(d)).catch(()=>{})},5000);
+</script>
+</body>
+</html>

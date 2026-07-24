@@ -1,0 +1,8 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.debian.pcsc-lite.access_pcsc" && subject.user == "pi") {
+        return polkit.Result.YES;
+    }
+    if (action.id == "org.debian.pcsc-lite.access_card" && subject.user == "pi") {
+        return polkit.Result.YES;
+    }
+});

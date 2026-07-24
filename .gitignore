@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+venv/
+.env
+*.deb
+*.tar.gz
+*.mfd
+*.bin
+/tmp/
+.DS_Store
+*.zip
+node_modules/
